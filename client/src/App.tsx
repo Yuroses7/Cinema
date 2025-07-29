@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface Movie {
   id: number;
@@ -11,165 +12,58 @@ const App: React.FC = () => {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState<number>(0);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchMovies = async () => {
-      setLoading(true);
-      setError(null);
+  const fetchMovies = async () => {
+    setLoading(true);
+    setError(null);
 
-      try {
-        console.log('🔄 กำลังโหลดข้อมูลภาพยนตร์...');
+    try {
+      const response = await fetch('http://localhost:5000/api/movies', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      });
 
-        // URL API ที่เราจะลองเชื่อมต่อตามลำดับ
-        const apiUrls = [
-          'http://localhost:5000/api/movies',
-          'http://127.0.0.1:5000/api/movies'
-          // เอา example API ออกเพราะไม่มีจริง
-        ];
-
-        let lastError = null;
-
-        for (const url of apiUrls) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // เพิ่ม timeout เป็น 5 วินาที
-
-            console.log(`🌐 กำลังลองเชื่อมต่อ: ${url}`);
-            const response = await fetch(url, {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-              },
-              signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            console.log('📦 ได้รับข้อมูล:', data);
-            console.log('📊 รูปแบบข้อมูล:', {
-              isArray: Array.isArray(data),
-              hasMessage: !!data.message,
-              hasMovies: !!data.movies,
-              dataKeys: Object.keys(data),
-              dataType: typeof data
-            });
-
-            // กรณีที่ API ส่งกลับมาแบบมี message และ movies array
-            if (data.message && Array.isArray(data.movies)) {
-              if (data.movies.length > 0) {
-                const validMovies = data.movies.map((movie: any) => ({
-                  id: movie.id || Date.now() + Math.random(),
-                  title: movie.title || 'ไม่มีชื่อภาพยนตร์',
-                  description: movie.description || 'ไม่มีคำอธิบาย',
-                  poster_url: movie.poster_url ||
-                    'https://via.placeholder.com/300x450/1a1a1a/ffffff?text=ไม่มีภาพ'
-                }));
-
-                console.log('✅ โหลดข้อมูลสำเร็จ:', validMovies.length, 'เรื่อง');
-                setMovies(validMovies);
-                setError(null); // ล้าง error เมื่อโหลดสำเร็จ
-                return;
-              } else {
-                throw new Error(`ไม่มีข้อมูลภาพยนตร์ในระบบ (${data.message})`);
-              }
-            }
-            // กรณีที่ API ส่งกลับมาเป็น array โดยตรง
-            else if (Array.isArray(data)) {
-              if (data.length > 0) {
-                const validMovies = data.map(movie => ({
-                  id: movie.id || Date.now() + Math.random(),
-                  title: movie.title || 'ไม่มีชื่อภาพยนตร์',
-                  description: movie.description || 'ไม่มีคำอธิบาย',
-                  poster_url: movie.poster_url ||
-                    'https://via.placeholder.com/300x450/1a1a1a/ffffff?text=ไม่มีภาพ'
-                }));
-
-                console.log('✅ โหลดข้อมูลสำเร็จ:', validMovies.length, 'เรื่อง');
-                setMovies(validMovies);
-                setError(null); // ล้าง error เมื่อโหลดสำเร็จ
-                return;
-              } else {
-                throw new Error('ไม่มีข้อมูลภาพยนตร์ในระบบ');
-              }
-            } else {
-              throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
-            }
-          } catch (err) {
-            // กำหนดให้ lastError เป็น Error
-            lastError = err instanceof Error ? err : new Error(String(err));
-            console.warn(`❌ การเชื่อมต่อล้มเหลวกับ ${url}:`, lastError.message);
-            continue;
-          }
-        }
-
-        // ถ้าไม่สามารถเชื่อมต่อกับ API ใดได้
-        throw lastError || new Error('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ใดๆ');
-
-      } catch (err) {
-        let errorMessage = 'เกิดข้อผิดพลาดในการโหลดข้อมูล';
-        if (err instanceof Error) {
-          errorMessage = err.message;
-        } else if (typeof err === 'string') {
-          errorMessage = err;
-        }
-
-        console.error('❌ เกิดข้อผิดพลาดในการโหลดข้อมูล:', errorMessage);
-        setError(errorMessage);
-
-        // ใช้ข้อมูลสำรองเฉพาะครั้งแรกที่ไม่สามารถเชื่อมต่อได้
-        if (movies.length === 0) {
-          console.log('📋 ใช้ข้อมูลสำรอง');
-          const fallbackMovies: Movie[] = [
-            {
-              id: 1,
-              title: "อเวนเจอร์ส: เผด็จศึก",
-              description: "มหากาพย์การต่อสู้เพื่อกู้จักรวาล",
-              poster_url: "https://image.tmdb.org/t/p/w500/q6725aR8Zs4IwGMXzZT8aC8lh41.jpg"
-            },
-            {
-              id: 2,
-              title: "สไปเดอร์แมน: โฮมคัมมิ่ง",
-              description: "การผจญภัยครั้งใหม่ของมนุษย์แมงมุม",
-              poster_url: "https://image.tmdb.org/t/p/w500/c24sv2weTHPsmDa7jEMN0m2P3RT.jpg"
-            },
-            {
-              id: 3,
-              title: "แบล็ค แพนเธอร์",
-              description: "ราชาแห่งวากันดา ผู้พิทักษ์โลก",
-              poster_url: "https://image.tmdb.org/t/p/w500/uxzzxijgPIY7slzFvMotPv8wjKA.jpg"
-            }
-          ];
-          setMovies(fallbackMovies);
-        }
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-    };
 
-    fetchMovies();
+      const data = await response.json();
+      
+      // รองรับทั้งรูปแบบ { movies: [...] } และ [...]
+      const movieList = data.movies || data;
+      
+      if (Array.isArray(movieList) && movieList.length > 0) {
+        const validMovies = movieList.map((movie: any) => ({
+          id: movie.id || Date.now() + Math.random(),
+          title: movie.title || 'ไม่มีชื่อภาพยนตร์',
+          description: movie.description || 'ไม่มีคำอธิบาย',
+          poster_url: movie.poster_url || 'https://via.placeholder.com/300x450/1a1a1a/ffffff?text=ไม่มีภาพ'
+        }));
 
-    // โหลดข้อมูลใหม่ทุกๆ 30 วินาที (สำหรับ development)
-    const intervalId = setInterval(() => {
-      console.log('🔄 Auto refresh...');
-      setRetryCount(prev => prev + 1);
-    }, 30000); // 30 วินาที
-
-    return () => clearInterval(intervalId);
-  }, [retryCount]);
-
-  const handleBooking = (movie: Movie) => {
-    alert(`🎫 กำลังจองตั๋วภาพยนตร์: ${movie.title}\nรหัส: ${movie.id}`);
+        setMovies(validMovies);
+      } else {
+        throw new Error('ไม่มีข้อมูลภาพยนตร์ในระบบ');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการโหลดข้อมูล';
+      setError(errorMessage);
+      console.error('Error fetching movies:', errorMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const refreshData = () => {
-    setRetryCount(prev => prev + 1);
+  useEffect(() => {
+    fetchMovies();
+  }, []);
+
+  const handleBooking = (movie: Movie) => {
+    // นำทางไปหน้าจองตั๋วพร้อม query parameters
+    navigate(`/booking?movieId=${movie.id}`);
   };
 
   if (loading) {
@@ -196,15 +90,26 @@ const App: React.FC = () => {
               </div>
               <h1 className="text-2xl font-bold text-white">AF Cineplex</h1>
             </div>
-            <button
-              onClick={refreshData}
-              className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded-lg hover:bg-amber-500/30 transition-colors flex items-center"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-              </svg>
-              โหลดใหม่
-            </button>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => navigate('/booking')}
+                className="px-4 py-2 bg-amber-500 text-black rounded-lg hover:bg-amber-400 transition-colors flex items-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 100 4v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2a2 2 0 100-4V6z" />
+                </svg>
+                จองตั๋ว
+              </button>
+              <button
+                onClick={fetchMovies}
+                className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded-lg hover:bg-amber-500/30 transition-colors flex items-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                </svg>
+                โหลดใหม่
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -212,16 +117,19 @@ const App: React.FC = () => {
       {/* แสดงข้อผิดพลาด (ถ้ามี) */}
       {error && (
         <div className="container mx-auto px-4 pt-6">
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 flex items-start">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-amber-400 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex items-start">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-400 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <div>
-              <h3 className="text-amber-300 font-medium">แจ้งเตือน</h3>
-              <p className="text-amber-200 text-sm mt-1">{error}</p>
-              {error.includes('ไม่มีข้อมูล') && (
-                <p className="text-amber-100 text-xs mt-2">ระบบจะลองโหลดข้อมูลอีกครั้งโดยอัตโนมัติ</p>
-              )}
+              <h3 className="text-red-300 font-medium">เกิดข้อผิดพลาด</h3>
+              <p className="text-red-200 text-sm mt-1">{error}</p>
+              <button
+                onClick={fetchMovies}
+                className="mt-2 text-red-300 hover:text-red-200 text-sm underline"
+              >
+                ลองใหม่อีกครั้ง
+              </button>
             </div>
           </div>
         </div>
@@ -252,9 +160,9 @@ const App: React.FC = () => {
               </svg>
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">ไม่พบภาพยนตร์</h2>
-            <p className="text-gray-400 mb-6">กำลังอัปเดตข้อมูลภาพยนตร์ล่าสุด</p>
+            <p className="text-gray-400 mb-6">ไม่สามารถโหลดข้อมูลภาพยนตร์ได้</p>
             <button
-              onClick={refreshData}
+              onClick={fetchMovies}
               className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-black font-medium rounded-lg transition-colors inline-flex items-center"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
@@ -308,7 +216,7 @@ const App: React.FC = () => {
         <div className="container mx-auto px-4">
           <div className="text-center">
             <p className="text-gray-400">
-              © {new Date().getFullYear()} MovieHub - ระบบจองตั๋วภาพยนตร์ออนไลน์
+              © {new Date().getFullYear()} AF Cineplex - ระบบจองตั๋วภาพยนตร์ออนไลน์
             </p>
             <p className="text-gray-500 text-sm mt-2">
               พัฒนาด้วย React, TypeScript และ Tailwind CSS

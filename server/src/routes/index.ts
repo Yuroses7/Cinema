@@ -4,6 +4,7 @@ import {
   getMovies, 
   getMovieById, 
   getMovieShowtimes, 
+  getAllShowtimes,  // เพิ่ม function นี้
   testConnection,
   getSeats,
   getShowtimeSeats,
@@ -29,16 +30,15 @@ router.get('/test-db', testConnection);
 
 // Movie endpoints
 router.get('/movies', getMovies);
-
-// Movie by ID endpoint - ใช้ pattern ธรรมดา
 router.get('/movies/:id', getMovieById);
-
-// Movie showtimes endpoint - ใช้ pattern ธรรมดา  
 router.get('/movies/:id/showtimes', getMovieShowtimes);
+
+// Showtime endpoints - เพิ่มส่วนนี้
+router.get('/showtimes', getAllShowtimes);
+router.get('/showtimes/:showtimeId/seats', getShowtimeSeats);
 
 // Seat endpoints
 router.get('/seats', getSeats);
-router.get('/showtimes/:showtimeId/seats', getShowtimeSeats);
 
 // Booking endpoints
 router.post('/bookings', createBooking);
@@ -56,6 +56,7 @@ router.get('/', (req, res) => {
       'GET /api/movies - Get all movies',
       'GET /api/movies/:id - Get movie by ID',
       'GET /api/movies/:id/showtimes - Get movie showtimes',
+      'GET /api/showtimes - Get all showtimes',  // เพิ่มบรรทัดนี้
       'GET /api/seats - Get all seats',
       'GET /api/showtimes/:showtimeId/seats - Get seats for showtime',
       'POST /api/bookings - Create new booking'
