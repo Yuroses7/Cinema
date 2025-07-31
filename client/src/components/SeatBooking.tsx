@@ -7,7 +7,6 @@ interface Seat {
   seat_type: 'regular' | 'premium' | 'vip';
   price: number;
   isBooked?: boolean;
-  is_booked?: boolean;
 }
 
 interface Movie {
@@ -22,82 +21,83 @@ interface Showtime {
   time: string;
 }
 
+const API_BASE = 'http://localhost:5000/api';
+
 const SeatBookingPage: React.FC = () => {
+  // State
   const [seats, setSeats] = useState<Seat[]>([]);
   const [selectedSeats, setSelectedSeats] = useState<Seat[]>([]);
-  const [loading, setLoading] = useState(true);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
   const [selectedMovie, setSelectedMovie] = useState<number | null>(null);
   const [selectedShowtime, setSelectedShowtime] = useState<number | null>(null);
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
-  const [isBooking, setIsBooking] = useState(false);
+  const [paymentSlip, setPaymentSlip] = useState<File | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [paymentReference, setPaymentReference] = useState<string>('');
+  const [isBooking, setIsBooking] = useState(false);
 
-  const API_BASE = 'http://localhost:5000/api';
-
+  // API Helper
   const fetchData = async (endpoint: string) => {
     const response = await fetch(`${API_BASE}${endpoint}`);
     if (!response.ok) throw new Error(`API error: ${response.status}`);
     return response.json();
   };
 
+  // Load initial data
   useEffect(() => {
-    const loadInitialData = async () => {
+    const loadData = async () => {
       try {
-        setError(null);
         const [movieData, showtimeData] = await Promise.all([
           fetchData('/movies'),
           fetchData('/showtimes')
         ]);
-        
         setMovies(Array.isArray(movieData.movies || movieData) ? (movieData.movies || movieData) : []);
         setShowtimes(Array.isArray(showtimeData.showtimes || showtimeData) ? (showtimeData.showtimes || showtimeData) : []);
-        setLoading(false);
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to load data');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load data');
+      } finally {
         setLoading(false);
       }
     };
-    loadInitialData();
+    loadData();
   }, []);
 
- useEffect(() => {
-  const loadSeats = async () => {
+  // Load seats when showtime changes
+  useEffect(() => {
     if (!selectedShowtime) {
       setSeats([]);
       setSelectedSeats([]);
       return;
     }
 
-    try {
-      setError(null);
-      const data = await fetchData(`/showtimes/${selectedShowtime}/seats`);
-      const seatsData = Array.isArray(data.data || data.seats || data) ? (data.data || data.seats || data) : [];
+    const loadSeats = async () => {
+      try {
+        const data = await fetchData(`/showtimes/${selectedShowtime}/seats`);
+        const seatsData = Array.isArray(data.data || data.seats || data) ? (data.data || data.seats || data) : [];
+        setSeats(seatsData.map((seat: any) => ({
+          id: seat.id || 0,
+          row_letter: seat.row_letter || '',
+          seat_number: seat.seat_number || 0,
+          seat_type: seat.seat_type || 'regular',
+          price: Number(seat.price) || 0,
+          isBooked: seat.is_booked || seat.isBooked || false
+        })));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load seats');
+        setSeats([]);
+      }
+    };
+    loadSeats();
+  }, [selectedShowtime]);
 
-      const processedSeats = seatsData.map((seat: any) => ({
-        id: seat.id || 0,
-        row_letter: seat.row_letter || '',
-        seat_number: seat.seat_number || 0,
-        seat_type: seat.seat_type || 'regular',
-        price: Number(seat.price) || 0,
-        isBooked: seat.is_booked || seat.isBooked || false
-      }));
-
-      setSeats(processedSeats);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to load seats');
-      setSeats([]);
-    }
-  };
-
-  loadSeats();
-}, [selectedShowtime]);
-
-
+  // Handlers
   const toggleSeatSelection = useCallback((seat: Seat) => {
-    if (seat.isBooked || seat.is_booked) return;
+    if (seat.isBooked) return;
     setSelectedSeats(prev => {
       const isSelected = prev.find(s => s.id === seat.id);
       return isSelected ? prev.filter(s => s.id !== seat.id) : [...prev, seat];
@@ -105,10 +105,8 @@ const SeatBookingPage: React.FC = () => {
   }, []);
 
   const getSeatColor = useCallback((seat: Seat) => {
-    const isBooked = seat.isBooked || seat.is_booked;
-    if (isBooked) return 'bg-red-500 cursor-not-allowed';
+    if (seat.isBooked) return 'bg-red-500 cursor-not-allowed';
     if (selectedSeats.find(s => s.id === seat.id)) return 'bg-green-500';
-    
     const colors = {
       vip: 'bg-amber-500 hover:bg-amber-400',
       premium: 'bg-blue-500 hover:bg-blue-400',
@@ -117,23 +115,56 @@ const SeatBookingPage: React.FC = () => {
     return colors[seat.seat_type];
   }, [selectedSeats]);
 
-  const totalPrice = useMemo(() => 
-    selectedSeats.reduce((total, seat) => total + (seat.price || 0), 0), 
+  const totalPrice = useMemo(() =>
+    selectedSeats.reduce((total, seat) => total + seat.price, 0),
     [selectedSeats]
   );
 
   const groupedSeats = useMemo(() => {
     return seats.reduce((groups, seat) => {
-      const row = seat.row_letter;
-      if (!groups[row]) groups[row] = [];
-      groups[row].push(seat);
+      if (!groups[seat.row_letter]) groups[seat.row_letter] = [];
+      groups[seat.row_letter].push(seat);
       return groups;
     }, {} as Record<string, Seat[]>);
   }, [seats]);
 
-  const handleBooking = async () => {
+  const generatePaymentReference = () => `AF${Date.now()}${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+
+  const generateQRCode = (amount: number, reference: string) => {
+    const qrData = { amount, reference, merchant: 'AF Cineplex', description: `Booking - ${reference}` };
+    return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(JSON.stringify(qrData))}`;
+  };
+
+  const handlePaymentSlipUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น (JPG, PNG)');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('ขนาดไฟล์ต้องไม่เกิน 5MB');
+      return;
+    }
+    setPaymentSlip(file);
+  };
+
+  const initiatePayment = () => {
     if (!selectedShowtime || selectedSeats.length === 0 || !customerName || !customerEmail) {
       alert('กรุณากรอกข้อมูลให้ครบถ้วน');
+      return;
+    }
+    const reference = generatePaymentReference();
+    setPaymentReference(reference);
+    setQrCodeUrl(generateQRCode(totalPrice, reference));
+    setShowPaymentModal(true);
+  };
+
+  const handleBooking = async () => {
+    if (!paymentSlip) {
+      alert('กรุณาอัปโหลดหลักฐานการชำระเงิน');
       return;
     }
 
@@ -146,16 +177,23 @@ const SeatBookingPage: React.FC = () => {
           showtimeId: selectedShowtime,
           customerName,
           customerEmail,
-          seatIds: selectedSeats.map(seat => seat.id)
+          seatIds: selectedSeats.map(seat => seat.id),
+          ticketImagePath: `/uploads/payment-slips/${paymentReference}.jpg`
         })
       });
 
       const result = await response.json();
-      if (result.success) {
-        alert(`จองตั๋วสำเร็จ! รหัสการจอง: ${result.data.booking_id}`);
+      
+      if (response.ok && result.success) {
+        alert(`จองตั๋วสำเร็จ! รหัสการจอง: ${result.data?.booking_id || 'N/A'}`);
+        // Reset form
         setSelectedSeats([]);
         setCustomerName('');
         setCustomerEmail('');
+        setPaymentSlip(null);
+        setShowPaymentModal(false);
+        setPaymentReference('');
+        setQrCodeUrl('');
         // Reload seats
         const data = await fetchData(`/showtimes/${selectedShowtime}/seats`);
         const seatsData = Array.isArray(data.data || data.seats || data) ? (data.data || data.seats || data) : [];
@@ -164,19 +202,20 @@ const SeatBookingPage: React.FC = () => {
           row_letter: seat.row_letter || '',
           seat_number: seat.seat_number || 0,
           seat_type: seat.seat_type || 'regular',
-          price: typeof seat.price === 'number' ? seat.price : 0,
+          price: seat.price || 0,
           isBooked: seat.is_booked || seat.isBooked || false
         })));
       } else {
-        alert(`เกิดข้อผิดพลาด: ${result.message}`);
+        alert(`เกิดข้อผิดพลาด: ${result.message || result.error}`);
       }
-    } catch (error) {
-      alert('เกิดข้อผิดพลาดในการจอง');
+    } catch (err) {
+      alert(`เกิดข้อผิดพลาด: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsBooking(false);
     }
   };
 
+  // Loading and Error states
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center">
@@ -195,7 +234,7 @@ const SeatBookingPage: React.FC = () => {
           <div className="text-red-500 text-6xl mb-4">⚠️</div>
           <h2 className="text-white text-xl mb-2">เกิดข้อผิดพลาด</h2>
           <p className="text-gray-400 mb-4">{error}</p>
-          <button 
+          <button
             onClick={() => window.location.reload()}
             className="bg-amber-500 hover:bg-amber-400 text-black font-bold py-2 px-4 rounded"
           >
@@ -232,7 +271,7 @@ const SeatBookingPage: React.FC = () => {
               <h2 className="text-xl font-bold text-white mb-4">เลือกภาพยนตร์</h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {movies.map(movie => (
-                  <div 
+                  <div
                     key={movie.id}
                     className={`cursor-pointer border-2 rounded-lg p-3 transition-all ${
                       selectedMovie === movie.id ? 'border-amber-500 bg-amber-500/10' : 'border-gray-600 hover:border-gray-500'
@@ -244,8 +283,8 @@ const SeatBookingPage: React.FC = () => {
                       setSeats([]);
                     }}
                   >
-                    <img 
-                      src={movie.poster_url} 
+                    <img
+                      src={movie.poster_url}
                       alt={movie.title}
                       className="w-full h-32 object-cover rounded mb-2"
                       onError={(e) => e.currentTarget.src = 'https://via.placeholder.com/300x450/1a1a1a/ffffff?text=ไม่มีภาพ'}
@@ -285,7 +324,7 @@ const SeatBookingPage: React.FC = () => {
             {selectedShowtime && (
               <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
                 <h2 className="text-xl font-bold text-white mb-4">เลือกที่นั่ง</h2>
-                
+
                 {seats.length === 0 ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-amber-500 mx-auto mb-4"></div>
@@ -327,10 +366,10 @@ const SeatBookingPage: React.FC = () => {
                                 <button
                                   key={seat.id}
                                   className={`w-8 h-8 rounded text-xs font-bold transition-all ${getSeatColor(seat)} ${
-                                    (seat.isBooked || seat.is_booked) ? '' : 'hover:scale-110'
+                                    seat.isBooked ? '' : 'hover:scale-110'
                                   }`}
                                   onClick={() => toggleSeatSelection(seat)}
-                                  disabled={seat.isBooked || seat.is_booked}
+                                  disabled={seat.isBooked}
                                   title={`${seat.row_letter}${seat.seat_number} - ${seat.seat_type} (฿${seat.price})`}
                                 >
                                   {seat.seat_number}
@@ -350,11 +389,11 @@ const SeatBookingPage: React.FC = () => {
           <div className="lg:col-span-1">
             <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 sticky top-24">
               <h2 className="text-xl font-bold text-white mb-4">สรุปการจอง</h2>
-              
+
               {selectedMovieData && (
                 <div className="mb-4">
-                  <img 
-                    src={selectedMovieData.poster_url} 
+                  <img
+                    src={selectedMovieData.poster_url}
                     alt={selectedMovieData.title}
                     className="w-full h-48 object-cover rounded-lg mb-3"
                     onError={(e) => e.currentTarget.src = 'https://via.placeholder.com/300x450/1a1a1a/ffffff?text=ไม่มีภาพ'}
@@ -407,29 +446,82 @@ const SeatBookingPage: React.FC = () => {
               </div>
 
               <button
-                onClick={handleBooking}
-                disabled={!selectedShowtime || selectedSeats.length === 0 || !customerName || !customerEmail || isBooking}
-                className="w-full mt-6 bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
+                onClick={initiatePayment}
+                disabled={!selectedShowtime || selectedSeats.length === 0 || !customerName || !customerEmail}
+                className="w-full mt-6 bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-3 px-4 rounded-lg transition-colors"
               >
-                {isBooking ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black mr-2"></div>
-                    กำลังจอง...
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 100 4v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2a2 2 0 100-4V6z" />
-                    </svg>
-                    จองตั๋ว (฿{totalPrice.toFixed(2)})
-                  </>
-                )}
+                ดำเนินการชำระเงิน (฿{totalPrice.toFixed(2)})
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Payment Modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-white">ชำระเงิน</h3>
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="text-center mb-6">
+              <div className="bg-white p-4 rounded-lg inline-block mb-4">
+                <img src={qrCodeUrl} alt="QR Code สำหรับชำระเงิน" className="w-48 h-48 mx-auto" />
+              </div>
+              <p className="text-white font-medium mb-2">สแกน QR Code เพื่อชำระเงิน</p>
+              <p className="text-amber-400 text-xl font-bold">฿{totalPrice.toFixed(2)}</p>
+              <p className="text-gray-400 text-sm">รหัสอ้างอิง: {paymentReference}</p>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-white text-sm font-medium mb-2">
+                อัปโหลดหลักฐานการชำระเงิน (สลิป)
+              </label>
+              <div className="border-2 border-dashed border-gray-600 rounded-lg p-4 text-center hover:border-amber-500 transition-colors">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePaymentSlipUpload}
+                  className="hidden"
+                  id="payment-slip"
+                />
+                <label htmlFor="payment-slip" className="cursor-pointer">
+                  {paymentSlip ? (
+                    <div>
+                      <div className="text-green-500 text-4xl mb-2">✓</div>
+                      <p className="text-green-400 font-medium">{paymentSlip.name}</p>
+                      <p className="text-gray-400 text-sm">คลิกเพื่อเปลี่ยนไฟล์</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="text-gray-400 text-4xl mb-2">📷</div>
+                      <p className="text-white">คลิกเพื่ออัปโหลดสลิป</p>
+                      <p className="text-gray-400 text-sm">รองรับไฟล์ JPG, PNG (ไม่เกิน 5MB)</p>
+                    </div>
+                  )}
+                </label>
+              </div>
+            </div>
+
+            <button
+              onClick={handleBooking}
+              disabled={!paymentSlip || isBooking}
+              className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-3 px-4 rounded-lg transition-colors"
+            >
+              {isBooking ? 'กำลังดำเนินการ...' : 'ยืนยันการจอง'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 export default SeatBookingPage;

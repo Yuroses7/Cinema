@@ -183,7 +183,7 @@ export const getShowtimeSeats = async (req: Request, res: Response): Promise<voi
 };
 
 export const createBooking = async (req: Request, res: Response): Promise<void> => {
-  const { showtimeId, customerName, customerEmail, seatIds } = req.body;
+  const { showtimeId, customerName, customerEmail, seatIds, ticketImagePath } = req.body;
 
   if (!showtimeId || !customerName || !customerEmail || !seatIds || !Array.isArray(seatIds)) {
     res.status(400).json({ 
@@ -213,10 +213,29 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // สร้างการจอง
+    // ดึงข้อมูลที่นั่งและคำนวณราคารวม
+    const [seatsInfo] = await connection.execute<mysql.RowDataPacket[]>(
+      `SELECT id, row_letter, seat_number, price FROM seats WHERE id IN (${seatIds.map(() => '?').join(',')})`,
+      seatIds
+    );
+
+    // คำนวณราคารวมและสร้างรายการที่นั่ง
+    const totalPrice = seatsInfo.reduce((sum, seat) => sum + parseFloat(seat.price), 0);
+    const seatNumbers = seatsInfo
+      .sort((a, b) => {
+        if (a.row_letter !== b.row_letter) {
+          return a.row_letter.localeCompare(b.row_letter);
+        }
+        return a.seat_number - b.seat_number;
+      })
+      .map(seat => `${seat.row_letter}${seat.seat_number}`)
+      .join(', ');
+
+    // สร้างการจองพร้อมข้อมูลเพิ่มเติม
     const [bookingResult] = await connection.execute<mysql.ResultSetHeader>(
-      'INSERT INTO bookings (showtime_id, customer_name, customer_email) VALUES (?, ?, ?)',
-      [showtimeId, customerName, customerEmail]
+      `INSERT INTO bookings (showtime_id, customer_name, customer_email, seat_numbers, total_price, ticket_image_path) 
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [showtimeId, customerName, customerEmail, seatNumbers, totalPrice, ticketImagePath || null]
     );
 
     // สร้างรายละเอียดการจอง
@@ -227,22 +246,27 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       );
     }
 
-    // ดึงข้อมูลการจอง
+    // ดึงข้อมูลการจองที่สมบูรณ์
     const [bookingInfo] = await connection.execute<mysql.RowDataPacket[]>(
       `SELECT b.id as booking_id, b.customer_name, b.customer_email, b.created_at,
-              m.title as movie_title, s.time as showtime,
-              GROUP_CONCAT(CONCAT(seat.row_letter, seat.seat_number) ORDER BY seat.row_letter, seat.seat_number) as seats,
-              SUM(seat.price) as total_price
+              b.seat_numbers, b.total_price, b.ticket_image_path,
+              m.title as movie_title, s.time as showtime
        FROM bookings b
        JOIN showtimes s ON b.showtime_id = s.id
        JOIN movies m ON s.movie_id = m.id
-       JOIN booking_details bd ON b.id = bd.booking_id
-       JOIN seats seat ON bd.seat_id = seat.id
-       WHERE b.id = ? GROUP BY b.id`, [bookingResult.insertId]
+       WHERE b.id = ?`, [bookingResult.insertId]
     );
 
     await connection.commit();
-    res.status(201).json({ success: true, message: 'สร้างการจองสำเร็จ', data: bookingInfo[0] });
+    res.status(201).json({ 
+      success: true, 
+      message: 'สร้างการจองสำเร็จ', 
+      data: {
+        ...bookingInfo[0],
+        seats: seatNumbers,
+        total_price: totalPrice
+      }
+    });
   } catch (error) {
     await connection.rollback();
     handleError(res, error, 'เกิดข้อผิดพลาดในการสร้างการจอง');
